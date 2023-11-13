@@ -1,0 +1,767 @@
+---
+title: "Cyclistic Bike Share Analysis"
+author: "Alexa"
+date: "`r Sys.Date()`"
+output: html_document
+
+---
+
+This analysis is for case study 1 from the Google Data Analytics Certificate **"Cyclistic bike-share"**
+I will use Cyclistic’s historical trip data to analyze and identify trends, which is the City of Chicago’s Divvy bicycle sharing service data made available by Motivate International Inc. under this [license](https://divvybikes.com/data-license-agreement). This public data can be accessed online. 
+
+I will analyze the data from October 1st 2022 to September 30th 2023.
+
+The purpose of this notebook is to consolidate downloaded Cyclistic data into a single data frame and then conduct simple analysis to help answer the key question: “In what ways do members and casual riders use Cyclistic bikes differently?”
+
+
+### Setting up my environment
+The 'tidyverse' includes packages that I will use along this analysis like 'dplyr', 'stringr', 'lubridate' and 'ggplot2'. 
+I will use 'scales' to customize the appearance of the axis and legend labels of my charts. 
+I will use 'gt' and 'formattable' to make the appearance of a few tables nicer.
+I will use 'sf' and 'mapwiew' to create a map with the most frequently used starting stations for customers' trips.
+
+```{r setup}
+library(tidyverse)
+library(scales)
+library(gt)
+library(sf)
+library(mapview)
+library(formattable)
+```
+
+
+### Data Wrangling
+
+There are multiple functions to load the files: read.csv(), the default csv reader that comes R base and creates data frames; read_csv() from the readr package, included in the tidyverse, which creates tibbles; and the fread() from the data.table package. I will use read_csv() which is faster than read.csv(), slower than fread(), but available with the tidyverse package. 
+
+```{r loading files}
+dec <- read_csv("/Users/alexandravelez/Desktop/R programming/Cyclist study case data 2/202212-divvy-tripdata.csv")
+nov <- read_csv("/Users/alexandravelez/Desktop/R programming/Cyclist study case data 2/202211-divvy-tripdata.csv")
+oct <- read_csv("/Users/alexandravelez/Desktop/R programming/Cyclist study case data 2/202210-divvy-tripdata.csv")
+aug <- read_csv("/Users/alexandravelez/Desktop/R programming/Cyclist study case data 2/202308-divvy-tripdata.csv")
+jul <- read_csv("/Users/alexandravelez/Desktop/R programming/Cyclist study case data 2/202307-divvy-tripdata.csv")
+jun <- read_csv("/Users/alexandravelez/Desktop/R programming/Cyclist study case data 2/202306-divvy-tripdata.csv")
+may <- read_csv("/Users/alexandravelez/Desktop/R programming/Cyclist study case data 2/202305-divvy-tripdata.csv")
+apr <- read_csv("/Users/alexandravelez/Desktop/R programming/Cyclist study case data 2/202304-divvy-tripdata.csv")
+mar <- read_csv("/Users/alexandravelez/Desktop/R programming/Cyclist study case data 2/202303-divvy-tripdata.csv")
+feb <- read_csv("/Users/alexandravelez/Desktop/R programming/Cyclist study case data 2/202302-divvy-tripdata.csv")
+jan <- read_csv("/Users/alexandravelez/Desktop/R programming/Cyclist study case data 2/202301-divvy-tripdata.csv")
+sep <- read_csv("/Users/alexandravelez/Desktop/R programming/Cyclist study case data 2/202309-divvy-tripdata.csv")
+
+```
+
+First I inspected all the files to get familiar with the column names and data types with these functions: 
+
+```{r inspecting the data}
+head(oct, 10)
+str(oct)
+summary(oct)
+```
+
+I applied this functions to all the data sets.
+
+When inspecting the data, each file represents a month of data, all of the files have the same number of columns, the columns have the same order, and the column names are consistent. I means that they can easily be combined into a single data frame with the rbind function from base R,  bind_rows from dplyr package or rbindlist from the data.table package, being rbind the slowest, and rbindlist the fastest regarding performance. I used bind_rows() here.
+
+```{r combining files into a single tibble}
+year <- bind_rows(apr, may, jun, jul, aug, sep, oct, nov, dec, jan, feb, mar)
+```
+
+Checking the tibbles were successfully combined:
+
+```{r Checking combined tibble is correct}
+str(year)
+```
+
+Year is a tibble with 5,674,399 rows and 13 columns. When inspecting the data types of the different variables, rideable_type and member_casual are categorical values, and therefore it makes sense to have them stored as factors instead of strings. Teh data frame has the columns started_at and ended_at stored as POSIXct, start_station_name, star_station_id, end_station-name and end_station_id stored as characters. start_lat, start_lng, end_lat, end_lng are stored as numeric, which is the appropriate data type for these variables. 
+
+Converting rideable_type and member_casual into factors:
+
+```{r converting two columns from string into factors}
+year$rideable_type = factor(year$rideable_type, levels = c('classic_bike', 'electric_bike', 'docked_bike'))
+levels(year$rideable_type)
+year$member_casual = factor(year$member_casual)
+str(year)
+```
+
+With the str() function I made sure the conversion was successful.
+
+Before any additional modifications of my data, I created a backup, so I can restore my tibble without executing all the code again in case of any errors.
+
+```{r data backup}
+year_backup <- year
+```
+
+To make the name of the column "member_casual" easier to understand, I renamed it 'customer_type': 
+
+```{r renaming member_casual}
+year <- year%>%
+  rename(customer_type = member_casual)
+```
+
+Checking the column name was correctly changed:
+
+```{r Checking the column name customer_type is correct }
+levels(year$customer_type)
+```
+
+I needed a calculated field for ride_length in order to analyze the trip duration for members and casual costumers. Then I converted ride_length data type from difftime to numeric and to a unit of minutes, to perform calculations later in my analysis.
+
+```{r creating ride_length column}
+year$ride_length_min = with(year, difftime(ended_at,started_at,units="mins"))
+
+year$ride_length_min <- as.numeric(year$ride_length_min, unit = "mins")
+
+```
+
+Checking the new column ride_lenght was created correctly: 
+
+```{r checking ride_lenght was created correctly }
+glimpse(year)
+```
+
+Creating a column for 'month', day of the week as 'weekday', and 'hour' to make it easier to aggregate the data for analysis: 
+ 
+```{r creating month, wday and hour columns}
+year$month <-month(year$started_at, label = TRUE)
+year$week_day <-wday(year$started_at, label = TRUE)
+year$hour <-hour(year$started_at)
+```
+
+Checking for duplicate entries:
+
+```{r}
+which(duplicated(year$ride_id))
+```
+
+No duplicated entries were found.
+
+
+### Cleaning the data 
+One of the most noticeable problems with this data set it the high number of NA in the start_station_name, start_station_id, end_station_name, end_station_id columns
+
+```{r Inspecting columns for NA}
+year[is.na(year$start_station_name),]
+year[is.na(year$end_station_name),]
+year[is.na(year$start_station_id),]
+year[is.na(year$end_station_id),]
+year[is.na(year$end_lat),]
+year[is.na(year$end_lng),]
+
+```
+
+The data frame has 873,186 blanks in the start_station_name column, 873,318 in the start_station_id column,  926,160 blanks in the end_station_name column, and 926,301 in the end_station_id column. 
+
+The data frame also has 6,642 NA in the end_lat and end_lng columns (0.11% of the rows).  However, the longitude and latitude of the starting point is complete, which means I can use this columns to map the location where casual costumers and member's trips are starting, as we will see later. 
+
+I will exclude the incomplete columns from the analysis except for start_station_name, as it is not possible to obtain complete information for these columns, and they are not essential for addressing the business problem.
+
+```{r eliminating start_station_id, end_station_name, end_station_id, end_lat, end_lng columns }
+year <- subset(year, select = -c(start_station_id, end_station_name, end_station_id, end_lat, end_lng))
+```
+
+Checking that the columns were correctly eliminated:
+
+```{r cheching the columns were eliminated from year tibble}
+str(year)
+```
+
+```{r Looking for NA in the remaining columns}
+year[!complete.cases(year),]
+```
+
+We can see that only the 873,186 NA identified in the start_station_name column are present. I will leave this column as it is for now, since I have the exact location (latitude and longitud) for these stations and having all the names will not be necessary for my analysis.
+
+All the data except from start_station_name is complete.
+
+####Descriptive analysis on ride length:
+
+```{r average ride lenght in minutes}
+year%>%
+summarize(avg_ride_length =mean(ride_length_min), median_ride_length=median(ride_length_min), max_ride_length=max(ride_length_min), min_ride_length=min(ride_length_min)) 
+```
+
+This descriptive analysis indicates the probable presence of **outliers and abnormal values**, reflected on a negative minimum ride length and a very long maximum ride length. I will look for ride lengths <=0 minutes.
+
+```{r looking for ride lengths with negative values}
+year[which(year$ride_length_min < 0),]
+```
+
+
+```{r looking for ride lengths equal to 0}
+year[which(year$ride_length_min == 0),]
+```
+
+Notably, there are 207 rides with a negative ride length and 836 with a length of 0. This pattern may correspond to instances when bikes were temporarily taken out of the docks by the company for quality checks or repairs.
+
+Since I lack additional information about rides with negative values, and this data cannot be meaningfully analyzed alongside the data for normal bike use by members or casual customers, I will store this information in an object named 'negative_ride_lengths' in case I need it in the future, and exclude these items from the rest of the dataset.
+
+```{r Storing rides with lengths less or equal to 0 in a different object, and removing them from the main dataset}
+negative_ride_lengths <- year[which(year$ride_length_min <= 0),]
+
+year <- year[-which(year$ride_length_min <= 0),]
+```
+
+Inspecting the data again to verify the minimum ride length is > than 0: 
+
+```{r Checking ride lenghts less or equal to 0 were removed}
+year%>%
+summarize(avg_ride_length =mean(ride_length_min), median_ride_length=median(ride_length_min), max_ride_length=max(ride_length_min), min_ride_length=min(ride_length_min)) 
+```
+
+On the other hand, it's worth noting that the maximum ride length is 98,489.07 minutes, which translates to 68.39 days. This is highly abnormal for Cyclistic service, given that, according to their website, a day pass allows for an unlimited number of three-hour rides within a 24-hour period. Additionally, for members, the first 45 minutes of a ride are free, with additional minutes incurring extra fees. Instances like this may be indicative of a stolen or lost bike, or potentially stem from data quality issues.
+
+In order to quickly grasp and identify outliers in this scenario, I will create a boxplot.
+
+Since this ride lengths are very long, I will convert them to hours before I create the boxplot.
+
+```{r Getting the ride lengths as hours}
+ride_length_hours <- with(year, difftime(ended_at,started_at,units="hours"))
+```
+
+Creating the boxplot:
+
+```{r Creating a boxplot to show the distribution of the ride lengths in hours }
+boxplot(ride_length_hours, horizontal = TRUE, main = "Ride length in hours from October 1st 2022 to September 30th 2023", xlab = "Hours", ylab = "Bike rides", notch = TRUE)
+```
+
+I can also use the IQR method to identify high outliers. The rule is that the data point needs to fall more than 1.5 times the Interquartile range above the third quartile to be considered a high outlier (Q3 + 1.5xIQR )
+
+```{r Obtaining the third q and looking at statistical information on the ride length distribution}
+summary(year$ride_length_min)
+IQR(year$ride_length_min)
+```
+
+Q3 = 17 and IQR = 11.56
+Q3 + 1.5 x IQR
+17 + 1.5(11.56) = 34.34 
+
+Upon examining the box plot, along with the statistical information provided by the summary function and the IQR method for detecting outliers, it can be concluded that values exceeding 34.34 minutes may be considered 'abnormally high' for the distribution of ride lengths in this dataset. Nevertheless, it is crucial to not hastily exclude data that, while appearing as outliers in the distribution, may actually reflect variations in how individuals use the bikes. For example, ride lengths for commuting may differ from those for leisure. Therefore, establishing a definitive cutoff between an outlier and a long ride is not straightforward.
+
+However, considering the company's policies, if a customer fails to return a bike within a 24-hour period, they may face a lost or stolen bike fee of $250. With this in mind, for the purposes of this analysis, I will be excluding trips with a duration exceeding 24 hours (1440 minutes) from the main dataset. I will store them separately in an object named 'long_rides' to perform an analysis on this data later.
+
+```{r Storing rides longer than 24 hours in an object}
+long_rides <- year[which(year$ride_length_min > 1440),]
+long_rides
+```
+
+5,946 rows were stored in the long_rides object.
+
+```{r removing rides longer than 24 hour from the dataset}
+year <- year[-which(year$ride_length_min > 1440),]
+```
+
+Now, I checking the rows with ride lengths greater than 24 hours or 1440 min were successfully removed from the main dataset.
+
+```{r Checking ride lenghts greater than 24 hours were removed}
+year%>%
+summarize(avg_ride_length =mean(ride_length_min), median_ride_length=median(ride_length_min), max_ride_length=max(ride_length_min), min_ride_length=min(ride_length_min)) 
+```
+
+### Analysis
+
+####  Analysis of ride length for different customer types, focusing on rides longer than 0 minutes but shorter than 24 hours:
+  
+First I will summarize the ride length by customer type, obtaining the average, mean, max, min of ride lengths and a count of the trips.
+```{r}
+ride_length_per_customer_type <- year %>% group_by(customer_type) %>% 
+  summarise(avg_ride_length =mean(ride_length_min), median_ride_length=median(ride_length_min),  max_ride_length=max(ride_length_min), min_ride_length=min(ride_length_min),
+            .groups = 'drop', number_of_rides = n_distinct(ride_id))
+
+ride_length_per_customer_type
+```
+  
+Then I will create a bar chart to analyze the average ride length by customer type for rides with length longer than 0 min and shorter than 24 hours:
+
+First I created and stored a theme to apply to the next charts to keep consistency.
+
+```{r Creating a consistent theme to apply across all the charts}
+mytheme <- theme(
+  plot.title = element_text(family = "Arial", face = "bold", size = (15), colour = "#5A5A5A"),
+  axis.title = element_text(family = "Arial", size = (10), colour = "#808080",  hjust=c(1), vjust=c(0)),
+  axis.text = element_text(family = "Arial", size = (10), colour = "#808080"),
+  legend.title = element_text(colour = "#808080", face = "bold", family = "Arial"),
+  legend.text = element_text(colour = "#808080", family = "Arial"),
+  plot.subtitle = element_text(colour = "#5A5A5A", family = "Arial"),
+  plot.caption = element_text(colour = "#5A5A5A", family = "Arial")
+)
+
+```
+
+Then I created a bar chart with ggplot 2. 
+
+```{r Creating a bar char of ride lengths by customer type}
+p1 <- ggplot(ride_length_per_customer_type, aes(x = customer_type, y = avg_ride_length, fill = c("Casual", "Member"))) + 
+  geom_col(width = 0.4) +
+  scale_x_discrete(labels = c("Casual", "Member"))+
+  scale_fill_manual(values = c("#0C2D48", "#B1D4E0"))+
+  labs(y= "Average Ride Length in Minutes", x = "Customer Type", title = "Average Ride Length in Minutes by Customer Type", caption = "October 1st 2022 to Semptember 30th 2023", subtitle = "The average ride length of casual customers is almost twice that of members,suggesting that the bikes\nmay be used for different purposes, such as leisure versus commuting", fill = "Customer Type")+
+  mytheme +
+  geom_text(data = NULL, label = "21 Min", y = 20, x=1, colour = "white", size = 3.5, family = "Arial" ) +
+  geom_text(data = NULL, label = "12 Min", y = 11.5, x=2, colour = "white", size = 3.5, family = "Arial")
+
+p1
+```
+
+The average ride length of casual customers is almost twice that of members, and the median ride length is 11.8 min for casual members vs 8.5 minutes for members.
+
+#### Number of rides by customer type:
+
+Then, to analyze the number of rides by customer type for rides  longer than 0 min and shorter than 24 hours I will use another bar chart.
+
+```{r bar chart to analyze the number of rides by customer type}
+p2 <-ggplot(ride_length_per_customer_type, aes(x = customer_type, y = number_of_rides, fill = c("Casual", "Member"))) +
+  geom_col(width = 0.4) +
+  scale_x_discrete(labels = c("Casual", "Member"))+
+  expand_limits(y = c(0, NA)) +
+  scale_y_continuous(labels = unit_format(unit = "M", scale = 1e-6))+
+  scale_fill_manual(values = c("#0C2D48", "#B1D4E0"))+
+  labs(y= "Number of Rides in Millions", x = "Customer Type", title = "Number of rides by Customer Type", caption = "October 1st 2022 to Semptember 30th 2023", subtitle = "Members use the bikes more often than casual customers.\n64% of the rides are taken by members, compared to 36% by casual customers." , fill = "Customer Type")+
+  mytheme +
+  geom_text(data = NULL, label = "2 Millions", y = 2000000, x=1, colour = "white", size = 3.5, family = "Arial" ) +
+  geom_text(data = NULL, label = "3.5 Millions", y = 3500000, x=2, colour = "white", size = 3.5, family = "Arial")
+
+p2
+```
+
+According to this data, members use the bikes more often than casual customers. 64% of the rides are taken by members, compared to 36% by casual customers.
+
+#### Analysis of ride length and the number of rides, categorized by customer type, on a monthly basis.
+
+First I summarized the data by customer type and month. Then I stored this data in the 'monthly_rides_per_customer_type' object :
+
+```{r summarizing data by cutomer type and month}
+monthly_rides_per_customer_type <- year %>% group_by(customer_type, month) %>% 
+  summarise(avg_ride_length =mean(ride_length_min), median_ride_length=median(ride_length_min), number_of_rides = n_distinct(ride_id))
+```
+
+Then, I changed the capitalization of customer types to make it easier to work with it when I make the next graph.
+
+```{r changing the capitalization of customer types for monthly rides per customer type}
+levels(monthly_rides_per_customer_type$customer_type) <- c("Casual", "Member") 
+```
+
+I also created a function named number_formatter to quickly and easily convert the units for the charts axis.
+
+```{r creating a number formatter function}
+number_formatter <- function(x) {
+  dplyr::case_when(
+    x < 1e3 ~ as.character(x),
+    x < 1e6 ~ paste0(as.character(x/1e3), "K"),
+    x < 1e9 ~ paste0(as.character(x/1e6), "M"),
+    TRUE ~ "To be implemented..."
+  )
+  }
+```
+
+I used a stacked bar chart to illustrate the number of rides by customer type and month. I put the units inside every bar to make it easier to understand by the reader. To do it, I created  functions to get the data for every month and customer type, so I didn't need to hard code the values, then converted them into a double, rounded them and pass them into a paste function and a loop. The loop created an annotation for each data inside a geom_text function and pass it to the ggplot function for the chart.
+
+```{r stacked chart for number of rides by customer type per month}
+p3 <- ggplot(monthly_rides_per_customer_type, aes(x = month, y = number_of_rides, fill = customer_type)) +
+  geom_col()+
+  scale_x_discrete(labels = c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov","Dec"))+
+  expand_limits(y = c(0, NA)) +
+  scale_y_continuous(labels = unit_format(unit = "K", scale = 1e-3))+
+  scale_fill_manual(values = c("#0C2D48", "#B1D4E0")) +
+  annotate("rect", xmin = 6.5, xmax =8.5, ymin = 0, ymax = 810000,
+           alpha = .01, colour = "#880808") +
+  labs(y= "Number of Rides in Thousands", x = "Customer Type", title = "Number of Rides by Customer Type and Month", caption = "October 1st 2022 to Semptember 30th 2023", subtitle = "Members and customers tend to use the bikes more frequently during the summer months, particularly\nin July and August, and significantly less during the colder months, from December to February", fill = "Customer Type")+
+  mytheme 
+
+for (i in 1:12) {
+  loop_input = paste( "geom_text(data = NULL, label = number_formatter(signif(as.double(",monthly_rides_per_customer_type[i,5], "), digits = 2)), y = ", monthly_rides_per_customer_type[i+12,5]," + ", (monthly_rides_per_customer_type[i,5]/2), ", x=", i, ", colour = 'white', size = 3, family = 'Arial')", sep = "")
+  p3 <- p3 + eval(parse(text=loop_input))
+  }
+
+for (i in 1:12) {
+  loop_input = paste("geom_text(data = NULL, label = number_formatter(signif(as.double(",monthly_rides_per_customer_type[i+12,5], "), digits = 2)), y = ", monthly_rides_per_customer_type[i+12,5]/2,", x=", i, ", colour = 'white', size = 3, family = 'Arial')", sep = "")
+  p3 <- p3 + eval(parse(text=loop_input))
+}
+
+p3
+```
+
+According to this data, members and customers tend to use the bikes more frequently during the summer months, particularly in July and August, and significantly less during the colder months, from December to February.
+
+####  Average ride length by customer type per month
+
+For this analysis, I created a line chart and used some annotations to make it easier to read and focus the attention of the reader to the important facts.
+
+```{r line chart for ride length by customer type per month}
+p4 <- ggplot(monthly_rides_per_customer_type, aes(x = month, y = avg_ride_length, group = customer_type, color = customer_type)) +
+  geom_point(size = 1.5) +
+  geom_line(size = 1.5) +
+  labs(title="Average Ride Length per Customer Type per Month", x="Month", y = "Average Ride Length in Minutes", caption = "October 1st 2022 to Semptember 30th 2023", subtitle = "Both members and casual customers take longer rides during the spring and summer months compared to the winter months.\nHowever, casual customers see a more significant increase in ride length (64%) compared to members (30%)", color = "Customer Type") +
+  scale_color_manual(values = c("#0C2D48", "#B1D4E0"))+
+  mytheme + 
+  annotate("rect", xmin = 4.5, xmax = 9, ymin = 21, ymax = 23.5,
+            alpha = .2) +
+  annotate("rect", xmin = 4.5, xmax = 9, ymin = 12, ymax = 14,
+           alpha = .2) +
+  annotate("text", x = 7, y = 13.5, label = "13",
+           alpha = .6, size = 3) +
+  annotate("text", x = 7, y = 23.2, label = "23",
+           alpha = .6, size = 3) +
+  annotate("text", x = 1, y = 10.4, label = "10",
+           alpha = .8, size = 3, color = "#880808") +
+  annotate("text", x = 0.9, y = 14.2, label = "14",
+           alpha = .8, size = 3, color = "#880808")
+
+p4
+```
+
+Both members and casual customers take longer rides during the spring and summer months compared to the winter months. However, casual customers see a more significant increase in ride length (64%) compared to members (30%), which might reflect a different purpose for their rides, like commuting vs leisure or tourism.
+
+
+#### Bike trips by customer type per day
+
+First, I created a summary for the data by customer type and day of the week and I will store it in the day_customer_type object. 
+
+```{r summarizing bike trips by customer type per day}
+day_customer_type <- year %>% group_by(customer_type, week_day) %>% 
+  summarise( number_of_rides = n_distinct(ride_id))
+```
+
+Then, I changed the capitalization of customer types to make it easier to work with it when I make the next graph.
+
+```{r changing the capitalization of for daily trips data}
+levels(day_customer_type$customer_type) <- c("Casual", "Member")
+```
+ 
+I created and stored the labels for the axis, legends and annotations to pass them later into the ggplot function. 
+
+```{r Creating the labels for the axis, leyends and annotations}
+p5_labels <- data.frame(
+  label= c("428 K", "575K" ),
+  customer_type = c("Casual", "Member"),
+  x <- c("Sat", "Thu"),
+  y <- c(415000, 565000)
+)
+
+p5_labels
+
+```
+
+Then I created two bar charts using the facet_wrap function by customer type.
+
+```{r Bar chart number of rides by customer type and day of the week}
+
+p5 <- ggplot(day_customer_type, aes(x = week_day, y = number_of_rides, fill = customer_type)) +
+  geom_col(width = 0.7) +
+  scale_fill_manual(values = c("#0C2D48", "#B1D4E0"))+
+  expand_limits(y = c(0, NA)) +
+  geom_text(data = NULL, label = "575 K", y = 3500000, x=2, colour = "white", size = 3.5, family = "Arial")+
+  scale_y_continuous(labels = unit_format(unit = "K", scale = 1e-3))+
+  geom_text(
+    data = p5_labels, 
+    mapping = aes(x = x, y = y, label = label), colour = "white", family = "Arial", size = 3)+
+  labs(y= "Number of Rides in Thousands", x = "Day", title = "Number of Rides by Customer Type and Day of the Week", caption = "October 1st 2022 to Semptember 30th 2023", subtitle = "Members tend to use the bikes more frequently on weekdays, particularly from Tuesday to Thursday,\nwhile casual customers show a higher usage on weekends. This observation may indicate distinct\npurposes for bike rides, such as commuting versus leisure", fill = "Customer Type")+
+  facet_wrap(~customer_type)+
+  mytheme
+  
+
+p5
+```
+
+According to this data, members tend to use the bikes more frequently on weekdays, particularly from Tuesday to Thursday, while casual customers show a higher usage on weekends. This observation may also indicate distinct purposes for bike rides, such as commuting versus leisure or tourism.
+
+
+#### Bike trips by customer type per hour of the day
+
+First, I created a summary for the bike trips by customer type and hour. This data will be stored in the hour_rides_per_customer_type object.
+
+```{r bike trips by customer type and hour summary data}
+hour_rides_per_customer_type <- year %>% group_by(customer_type, hour) %>% 
+  summarise(avg_ride_length = mean(ride_length_min), number_of_rides = n_distinct(ride_id))
+```
+
+Then, I changed the capitalization of customer types to make it easier to work with it when I make the next graph.
+
+```{r changing the capitalization of rides by customer type and hour}
+levels(hour_rides_per_customer_type$customer_type) <- c("Casual", "Member")
+```
+
+Then I created a line chart since I wanted to analyze changes in trends over time. I created a few annotations so the reader can quickly spot relevant numbers. 
+
+```{r line chart for number of rides by customer type and hour}
+p6 <- ggplot(hour_rides_per_customer_type, aes(x = hour, y = number_of_rides, fill = customer_type, color=customer_type)) +
+  geom_line(size = 1.5) +
+  expand_limits(y = c(0, NA)) +
+  scale_y_continuous(labels = unit_format(unit = "K", scale = 1e-3))+
+  labs(title="Number of rides per Customer Type per Hour", x="Hour", y = "Number of Rides in Thousands", caption = "October 1st 2022 to Semptember 30th 2023", subtitle = "Casual customers tend to use the bikes more frequently in the afternoon hours, with a peak at 5 pm.\nIn contrast, members exhibit their highest ridership during the morning and afternoon rush hours, suggesting that\nmembers might be primarily using the bikes for commuting", color = "Customer Type") +
+  scale_color_manual(values = c("#0C2D48", "#B1D4E0"))+
+  annotate("text", x = 8, y = 242000, label = "236K",
+           alpha = .6, size = 3) +
+  annotate("text", x = 17, y = 385000, label = "378K",
+           alpha = .6, size = 3) +
+  annotate("text", x = 17, y = 209000, label = "201K",
+           alpha = .6, size = 3) +
+  mytheme
+
+p6
+```
+
+Casual customers tend to use the bikes more frequently in the afternoon hours, with a peak at 5 pm. In contrast, members exhibit their highest ridership during the morning and afternoon rush hours, suggesting that members might be primarily using the bikes for commuting.
+
+#### Analysis of rideable bike by customer type:
+
+I started this section by summarizing the data on rideable type by customer type and stored it in an object.
+
+```{r summarizing rideable type by customer type}
+rideable_type <- year %>% group_by(customer_type, rideable_type) %>% 
+  summarise( number_of_rides = n_distinct(ride_id), avg_ride_length = mean(ride_length_min))
+```
+
+Then, I changed the capitalization of customer types to make it easier to work with it when I make the next graph.
+
+```{r changing the capitalization of rideable type by customer type}
+levels(rideable_type$customer_type) <- c("Casual", "Member")
+```
+
+Then I created a bar chart to illustrate the frequency of usage of the different type of bikes by customer type.
+
+```{r bar chart rideable type by customer type}
+p7 <- ggplot(rideable_type,aes(rideable_type,number_of_rides, fill = customer_type))+
+  geom_bar(stat="identity", position = "dodge", width = 0.4)+
+  expand_limits(y = c(0, NA)) +
+  scale_fill_manual(values = c("#0C2D48", "#B1D4E0"))+
+  scale_y_continuous(labels = unit_format(unit = "M", scale = 1e-6))+
+  scale_x_discrete(labels = c("Classic bike", "Electric bike", "Docked bike"))+
+  labs(y= "Number of Rides in Millions", x = "Bike Type", title = "Number of Rides per Bike and Customer Type", caption = "October 1st 2022 to Semptember 30th 2023", subtitle = "Casual customers and members both use more frequently electric bikes than classic bikes.\nHowever, a third class of bike shows up in the data, 'Docked Bike', which is used only by casual customers,\nin a substantially minor frequency. This observation needs further analysis.", fill = "Customer Type")+
+  mytheme+
+  geom_segment(aes(x = 3, y = 250000, xend = 3, yend = 110000), colour = "#880808",
+               arrow = arrow(length = unit(0.5, "cm")))+
+  geom_text(data = NULL, label = "834K", y = 790000, x=0.9, colour = "white", size = 3.5, family = "Arial" )+
+  geom_text(data = NULL, label = "1.7 M", y = 1700000, x=1.1, colour = "white", size = 3.5, family = "Arial" ) +
+  geom_text(data = NULL, label = "1.1 M", y = 1110000, x=1.9, colour = "white", size = 3.5, family = "Arial" )+
+  geom_text(data = NULL, label = "1.8 M", y = 1810000, x=2.1, colour = "white", size = 3.5, family = "Arial" )+
+  geom_text(data = NULL, label = "96 K", y = 50000, x=3, colour = "white", size = 3.5, family = "Arial" )
+
+
+p7
+
+```
+
+Casual customers and members both use more frequently electric bikes than classic bikes. However, a third class of bike shows up in the data, 'Docked Bike', which is used only by casual customers, in a substantially minor frequency. This observation needs further analysis since it is not something expected with this data. 
+
+For this, I created an object with the information to take a closer look to the length of the rides by bike type.
+
+```{r summarizing data ride length by bike type}
+bike_type <- year%>%
+ group_by(rideable_type)%>%
+  summarise(avg_ride_length = mean(ride_length_min))
+
+bike_type
+```
+
+We can see that the length of the trips with docked bikes is very long. I created a bar chart to compared it to the average time lengths for other types of bikes.
+
+```{r bar chart with ride length by bike type}
+p8 <- ggplot(bike_type, aes(rideable_type, avg_ride_length, fill = rideable_type))+
+  geom_col(width = 0.4, fill =c("#005b96", "#005b96", "#880808"))+
+  scale_x_discrete(labels = c("Classic bike", "Electric bike", "Docked bike"))+
+  labs(y= "Average Ride Length in Minutes", x = "Bike Type", title = "Average Ride Length by Rideable Type", caption = "October 1st 2022 to Semptember 30th 2023", subtitle = "The average ride length for docked bikes is more than three times longer than that of electric or classic bikes.\nFurthermore, the fact that members have recorded zero trips with docked bikes, compared to 4.56% of the\ntotal trips taken by casual customers, may suggest a potential error in these entries.", fill = "Bike Type")+
+  mytheme+
+  geom_text(data = NULL, label = "17 Min", y = 16, x=1, colour = "white", size = 3.5, family = "Arial" )+
+  geom_text(data = NULL, label = "12 Min", y = 11.2, x=2, colour = "white", size = 3.5, family = "Arial" )+
+  geom_text(data = NULL, label = "54 Min", y = 53, x=3, colour = "white", size = 3.5, family = "Arial" )
+
+p8
+
+```
+
+The average ride length for docked bikes is more than three times longer than that of electric or classic bikes. Furthermore, the fact that members have recorded zero trips with docked bikes, and docked bikes correspond to 4.56% of the total trips taken by casual customers, may suggest a potential error in these entries. For instance it might be the case that the trip ended, and the bike was docked back at the station, but the registration of the length of the trip didn't stop for some reason. 
+
+
+#### Rides with length longer than 24 hours
+
+For this analysis I came back to the previously stored information with rides longer than 24 hours. Then I summarized it by ride length and number of rides.
+
+```{r summarizing long rides}
+
+long_rides_bike <- long_rides%>%
+  group_by(rideable_type)%>%
+  summarize(number_of_rides = n_distinct(ride_id), avg_ride_length = mean(ride_length_min))
+
+```
+
+Since these rides are long, I converted them from minutes to hours.
+
+```{r Converting average ride length from minutes to hours}
+long_rides_bike$avg_ride_length = long_rides_bike$avg_ride_length/60
+```
+
+Then I changed the capitalization of the bike types so I can use them nicely in a table.
+
+```{r changing capitalization of bike type}
+levels(long_rides_bike$rideable_type) <- c("Classic Bike", "Electric Bike", "Docked Bike")
+```
+
+Since with this data I want to compare just a couple of numbers, a simple table is the right fit. I used the gt function from the gt package to give a nice format to this table.
+
+```{r}
+t1 <- long_rides_bike%>%
+  gt()%>%
+  tab_header(
+    title = md("Bike Rides Longer than 24 Hours"))%>%
+  tab_source_note(md("October 1st 2022 to Semptember 30th 2023"))%>%
+  cols_label(
+    rideable_type = "Bike Type",
+    number_of_rides = "Number of Rides",
+    avg_ride_length= "Average Ride Length(Hours)"
+  )%>%
+  opt_stylize(style = 6, color = "blue")
+
+cols_align(t1,
+    align = c("center"),
+    columns = everything()
+  )
+
+t1
+```
+
+According to this data, there are no rides with electric bikes longer than 24 hours, 4207 rides with classic bikes, and 1739 with docked bikes. Notably, for rides longer than 24 hours, the average ride length for docked bikes is substantially longer at 116 hours, compared to 24 hours for classic bikes. This further suggests that there may be errors in the docked bikes entries.
+
+#### Analyzis on the most frequently used starting locations for customers' trips
+
+As I mentioned earlier, I have complete information for the starting locations in terms of latitude and longitude, whereas the station name column is incomplete.
+
+I started by storing this information in an object, grouped by customer type and location, then summarizing it by number of rides departing from each location, and then sorting the information in descending order. 
+
+```{r organizing information about departure location of the bike trips}
+stations <- year%>%
+  select(ride_id, start_station_name, start_lat, start_lng, customer_type)%>%
+  group_by( customer_type, start_lat, start_lng, start_station_name)%>%
+  summarise(number_of_rides = n_distinct(ride_id))%>%
+  arrange(-number_of_rides)
+
+stations
+```
+
+Then I filtered the information by customer type in order to create a map for the 20 most frequently used starting locations by customer type
+
+```{r Filtering information about trip starting locations by casual customers}
+stations_casual <- filter( stations, customer_type == "casual")
+
+```
+
+Then I selected the 20 most frequently used locations by casual customers.
+
+```{r Selecting the 20 most frequently used locations by casual customers}
+stations_casual<- stations_casual[1:20, ]
+stations_casual
+```
+
+Same steps for member customers. Filtering the information.
+
+```{r Filtering information about trip starting locations by members}
+stations_member <- filter( stations, customer_type == "member")
+
+```
+
+Selecting the 20 most frequently used locations by members.
+
+```{r Selecting the 20 most frequently used locations by members}
+stations_member<- stations_member[1:20, ]
+stations_member
+```
+
+#### The top 20 most frequently used departure locations for casual customers: 
+
+To visualize this data, I created a map and a table:
+
+```{r The top 20 most frequently used departure locations for casual customers }
+map_casual <- mapview(stations_casual, xcol = "start_lng", ycol = "start_lat", crs = 4269, grid = FALSE)
+map_casual
+
+```
+
+
+#### The top 20 most frequently used departure locations for members:
+
+```{r}
+map_member <- mapview(stations_member, xcol = "start_lng", ycol = "start_lat", crs = 4269, grid = FALSE)
+map_member
+```
+
+To make it easier to compare this data, I created a couple of tables with the top 10 most frequently used departure locations by customer type, and assigned a provisional name with a consecutive number like "station 1" and "station 2" for the locations without a name of the station available in the data. 
+
+Selecting the top ten most frequently used locations for each customer type:
+
+```{r}
+stations_member<- stations_member[1:10, ]
+stations_casual<- stations_casual[1:10, ]
+```
+
+Adding provisional names:
+
+```{r Adding provisional names to the stations with mission names}
+stations_member[1,4]<- "Station 1"
+stations_member[6,4]<- "Station 2"
+stations_member[7,4]<- "Station 3"
+stations_member[10,4]<- "Station 4"
+stations_casual[9,4]<- "Station 5"
+stations_casual[10,4]<- "Station 6"
+```
+
+Removing the customer type for each table, since it is not neccesary becase the data is already filtered.
+
+```{r}
+
+stations_casual <- subset(stations_casual, select = -customer_type)
+stations_casual
+stations_member <- subset(stations_member, select = -customer_type)
+stations_member
+```
+
+Subsequently, I gave the columns of each table a more reader-friendly name:
+
+```{r}
+colnames(stations_casual) <- c("Latitud", "Longitud", "Station Name", "Number of Rides")
+colnames(stations_casual)
+
+colnames(stations_member) <- c("Latitud", "Longitud", "Station Name", "Number of Rides")
+colnames(stations_member)
+```
+
+Lastly, I used the formattable function from the formattable to quickly add some format to these tables
+
+#### The top 10 most frequently used departure locations for casual customers
+
+```{r Formatting casual customers departing location table}
+t2 <- formattable(
+  stations_casual,
+  align = "c"
+)
+t2
+```
+
+#### The top 10 most frequently used departure locations for members
+
+```{r Formatting member customers departing location table}
+t3 <- formattable(
+  stations_member,
+  align = "c"
+)
+t3
+
+```
+
+Among the most frequently used departure locations for casual customers we have Streeter Dr & Grand Ave situated nearby to Jane Addams Memorial Park, the apartment building Lake Point Tower, Chicago Children's Museum, and Milton Lee Olive Park. Also Lake Shore Dr & Monroe St, which is situated nearby to the playground Slide Crater,the pier Monroe Harbor - North Harbor Public Dock, Millenium Park, Maggie Daley park and Grand Park.
+
+For the most frequently used departure locations for members, we have the station located at latitude 41.89000	longitude -87.63000, with the provisional name of "station 1", is at the River North neighborhood in downtown Chicago. This neighborhood is well known for having dozens of high-end art and design galleries, dining establishments, and nightlife spots. Most of the residents of the area rent their homes and many are young professionals.
+We also have Clark St & Elm St, which is located at the Near North Side neighborhood in Chicago Ridge, also known for its fine dining, galleries, nightlife, and riverwalk amenities.
+
+Since the information about the end of the trips is not complete, this sections of the analysis was made with the intention to provide a general idea about the use of the bikes by type of customers. 
+
+
+### Recommendations
+
+* The information with negative ride lengths needs to be reviewed. If the negative ride lengths correspond to errors in the time length recording, it needs to be fixed, or if the bikes are taken out for quality check or repairs, it should be recorded as it is and not as a ride trip by a customer. 
+
+* The information about the docked bikes needs to be reviewed, and especially the reason why these ride lengths are so long and where taken only by casual customers, which doesn't make sense. 
+
+* The data shows members use the bikes primarily during weekdays with a peak at 8 and 5 pm, while casual customers use the bikes more often during the weekends afternoon, with a peak at 5 pm. Members usually take shorter rides than casual customers. This suggests members use the bikes primarily for commuting, while casual customers might be using the bikes for leisure rides or tourism. This means that it can be a good idea to design a marketing campaign to target young professionals interested in a transportation alternative for commuting. 
+
+* Resources for advertising should be spent during the spring and summer months, avoiding the cold weather months because the demand for bikes is very low during this time of the year.
+
+*Casual customers use the bikes more often during the weekends. In order to convert casual customer into members, one possibility is to offer some additional perks to this customers, like a weekend only membership.
