@@ -2,10 +2,8 @@
 Cyclistic-Bike-Share-Analysis
 </h1>
 <p align="center">
-
-</p>
 <img width="346" alt="Screenshot 2023-11-13 at 6 00 53 PM" src="https://github.com/alexavelez/cyclistic_analysis/assets/143228567/8f2f5b29-86e7-4380-8830-7cc3e3b8c604">
-
+</p>
 
 
 ### Overview
