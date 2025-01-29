@@ -8,6 +8,8 @@ Cyclistic-Bike-Share-Analysis
 
 ### Overview
 
+For a better visualization of this project, please see the project in this link: [Cyclistic Bike Share Analysis](https://www.kaggle.com/code/alexandravlezrodas/cyclistic-bike-share-analysis).
+
 Cyclistic is an enterprise which inaugurated a bicycle-sharing initiative in 2016. Since its inception, the program has expanded to encompass a fleet of 5,824 bicycles, each equipped with geotracking capabilities and securely integrated into a network of 692 stations spanning Chicago. These bicycles can be accessed from one station and conveniently returned to any other station within the system at any given time. Notably, Cyclistic distinguishes itself by offering a range of specialized bicycles, including reclining models, hand tricycles, and cargo bikes. This commitment to inclusivity extends the benefits of bike-sharing to individuals with disabilities and those who may face challenges with conventional two-wheeled bicycles.
 
 Cyclistic's marketing strategy has so far focused on creating general awareness and appealing to a wide consumer base. This was facilitated by offering flexible pricing plans, including single-ride passes, full-day passes, and annual memberships. Casual riders are those who opt for single-ride or full-day passes, while annual members are considered Cyclistic members. 
