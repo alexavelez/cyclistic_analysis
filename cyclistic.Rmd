@@ -6,6 +6,8 @@ output: html_document
 
 ---
 
+For a better visualization of this project, please see the project in this link: [Cyclistic Bike Share Analysis](https://www.kaggle.com/code/alexandravlezrodas/cyclistic-bike-share-analysis).
+
 This analysis is for case study 1 from the Google Data Analytics Certificate **"Cyclistic bike-share"**
 I will use Cyclistic’s historical trip data to analyze and identify trends, which is the City of Chicago’s Divvy bicycle sharing service data made available by Motivate International Inc. under this [license](https://divvybikes.com/data-license-agreement). This public data can be accessed online. 
 
